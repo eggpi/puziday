@@ -287,7 +287,7 @@ def render_to_ppm(solution):
 
 today = datetime.datetime.today()
 solution = solve_for_day(month = today.month, day = today.day,
-                         day_of_week = (today.weekday() + 2 % 7))
+                         day_of_week = 1 + ((today.weekday() + 1) % 7))
 output_file = os.path.join('solutions', today.strftime('%Y-%m-%d.ppm'))
 with open(output_file, 'wb') as output:
     output.write(render_to_ppm(solution).encode('utf-8'))
