@@ -1,26 +1,31 @@
+import os
+import sys
+import datetime
 import pprint
 from dataclasses import dataclass
 
 GRID_ROWS = 8
 GRID_COLS = 7
 NUM_CELLS_TO_COVER = GRID_COLS * GRID_ROWS - 3 - 6
+CELL_SIZE_PX = 100
 
 @dataclass(eq = True, frozen = True)
 class Piece:
     name: str
     edges: tuple[str]
+    rgb_color_hex: str
 
 PIECES = [
-    Piece(name = 'Pento L', edges = ('L', 'U', 'U', 'U')),
-    Piece(name = 'Pento T', edges = ('R', 'R', 'U', 'DD')),
-    Piece(name = 'Pento P', edges = ('R', 'R', 'D', 'L')),
-    Piece(name = 'Pento N', edges = ('R', 'U', 'R', 'R')),
-    Piece(name = 'Pento V', edges = ('R', 'R', 'D', 'D')),
-    Piece(name = 'Pento U', edges = ('U', 'R', 'R', 'D')),
-    Piece(name = 'Pento Z', edges = ('R', 'D', 'D', 'R')),
-    Piece(name = 'Tetr I', edges = ('R', 'R', 'R')),
-    Piece(name = 'Tetr S', edges = ('R', 'U', 'R')),
-    Piece(name = 'Tetr L', edges = ('L', 'U', 'U')),
+    Piece('Pento L', ('L', 'U', 'U', 'U'), '#FAFF81'),
+    Piece('Pento T', ('R', 'R', 'U', 'DD'), '#FFC53A'),
+    Piece('Pento P', ('R', 'R', 'D', 'L'), '#E06D06'),
+    Piece('Pento N', ('R', 'U', 'R', 'R'), '#B26700'),
+    Piece('Pento V', ('R', 'R', 'D', 'D'), '#004E89'),
+    Piece('Pento U', ('U', 'R', 'R', 'D'), '#177E89'),
+    Piece('Pento Z', ('R', 'D', 'D', 'R'), '#412234'),
+    Piece('Tetr I', ('R', 'R', 'R'), '#63A088'),
+    Piece('Tetr S', ('R', 'U', 'R'), '#052F5F'),
+    Piece('Tetr L', ('L', 'U', 'U'), '#5C8001'),
 ]
 
 def rotate_90deg_counterclockwise(piece: Piece):
@@ -36,7 +41,7 @@ def rotate_90deg_counterclockwise(piece: Piece):
             edges.append('R' * len(e))
         else:
             raise ValueError(e)
-    return Piece(piece.name, tuple(edges))
+    return Piece(piece.name, tuple(edges), piece.rgb_color_hex)
 
 def mirror_vertically(piece: Piece):
     edges = []
@@ -49,7 +54,7 @@ def mirror_vertically(piece: Piece):
             edges.append('L' * len(e))
         elif e.startswith('D'):
             edges.append('D' * len(e))
-    return Piece(piece.name, tuple(edges))
+    return Piece(piece.name, tuple(edges), piece.rgb_color_hex)
 
 # Generate all possible orientations of each piece; they won't be distinct
 # as the same (visual) orientation can be encoded as different sequences of
@@ -207,7 +212,7 @@ def solve_x(all_placements):
         if not constraint_to_placements[constraint]:
             return None
         for next_placement in list(constraint_to_placements[constraint]):
-            print(' ' * level * 2 + f'{next_placement.piece.name}')
+            # print(' ' * level * 2 + f'{next_placement.piece.name}')
             satisfied_constraints = next_placement.satisfied_constraints()
             removed_placements = prune(satisfied_constraints,
                                        constraint_to_placements)
@@ -260,4 +265,29 @@ def solve_naive(all_placements):
         return None
     return solve(NUM_CELLS_TO_COVER, all_placements)
 
-pprint.pprint(solve_for_day(month = 2, day = 3, day_of_week = 3))
+def hext_to_rgb_tuple(rgb_color_hex):
+    rgb_color_hex = rgb_color_hex.lstrip('#')
+    return tuple(int(hh, 16)
+         for hh in (rgb_color_hex[:2], rgb_color_hex[2:4], rgb_color_hex[4:]))
+
+def render_to_ppm(solution):
+    cell_to_rgb_color = {}
+    for placement in solution:
+        for cell in placement.cells:
+            cell_to_rgb_color[cell] = hext_to_rgb_tuple(placement.piece.rgb_color_hex)
+
+    ppm = []
+    ppm.append(f'P3\n{GRID_COLS * CELL_SIZE_PX} {GRID_ROWS * CELL_SIZE_PX}\n255')
+    for row in range(GRID_ROWS):
+        for _ in range(CELL_SIZE_PX):
+            for col in range(GRID_COLS):
+                rgb = cell_to_rgb_color.get(Cell(row, col), (0, 0, 0))
+                ppm.append(f'{" ".join(map(str, rgb))}\n' * CELL_SIZE_PX)
+    return '\n'.join(ppm)
+
+today = datetime.datetime.today()
+solution = solve_for_day(month = today.month, day = today.day,
+                         day_of_week = (today.weekday() + 2 % 7))
+output_file = os.path.join('solutions', today.strftime('%Y-%m-%d.ppm'))
+with open(output_file, 'wb') as output:
+    output.write(render_to_ppm(solution).encode('utf-8'))
