@@ -9,7 +9,7 @@ from dataclasses import dataclass
 GRID_ROWS = 8
 GRID_COLS = 7
 NUM_CELLS_TO_COVER = GRID_COLS * GRID_ROWS - 3 - 6
-CELL_SIZE_PX = 100
+CELL_SIZE_PX = 50
 
 @dataclass(eq = True, frozen = True)
 class Piece:
