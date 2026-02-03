@@ -161,29 +161,43 @@ def solve_x(all_placements):
     assert(len(constraint_to_placements) == len(PIECES) + NUM_CELLS_TO_COVER)
 
     def prune(satisfied_constraints, constraint_to_placements):
-        removed_constraints = []
+        '''
+        Remove constraints that were satisfied by a placement selection.
+
+        We also remove all placements that satisfy those constraints, saving
+        them for future backtracking.
+
+        Returns:
+            removed_placements: list[set[Placement]], the placements removed
+                                from satisfied_constraints, in reverse order of
+                                that list.
+        '''
+        removed_placements = []
         for satisfied_constraint in satisfied_constraints:
             placements_to_remove = constraint_to_placements[satisfied_constraint]
-            removed_constraints.append(set(placements_to_remove))
-            # Remove all placements that could satisfy one of the
-            # constraints of the next_placement.
+            removed_placements.append(set(placements_to_remove))
             for placement_to_remove in list(placements_to_remove):
                 for other_constraint in placement_to_remove.satisfied_constraints():
                     constraint_to_placements[other_constraint].remove(placement_to_remove)
             assert not constraint_to_placements[satisfied_constraint]
             del constraint_to_placements[satisfied_constraint]
-        return removed_constraints
+        return removed_placements
 
-    def backtrack(satisfied_constraints, removed_constraints, constraint_to_placements):
-        # Backtrack. removed_constraints contains the placements (rows) for each of
-        # the satisfied_constraints, in reverse order.
+    def backtrack(satisfied_constraints, removed_placements, constraint_to_placements):
+        '''
+        Restore constraints_to_placements (aka incidence matrix) from a prune.
+
+        We re-add all satisfied constraints, and re-add their satisfying placements to
+        other constraints that were not removed.
+        '''
+
         for satisfied_constraint in reversed(satisfied_constraints):
             assert satisfied_constraint not in constraint_to_placements
-            constraint_to_placements[satisfied_constraint] = removed_constraints.pop()
+            constraint_to_placements[satisfied_constraint] = removed_placements.pop()
             for placement_to_restore in list(constraint_to_placements[satisfied_constraint]):
                 for other_constraint in placement_to_restore.satisfied_constraints():
                     constraint_to_placements[other_constraint].add(placement_to_restore)
-        assert not removed_constraints
+        assert not removed_placements
 
     def solve(constraint_to_placements, level = 0):
         if not constraint_to_placements:
@@ -195,14 +209,14 @@ def solve_x(all_placements):
         for next_placement in list(constraint_to_placements[constraint]):
             print(' ' * level * 2 + f'{next_placement.piece.name}')
             satisfied_constraints = next_placement.satisfied_constraints()
-            removed_constraints = prune(satisfied_constraints,
-                                        constraint_to_placements)
-            assert removed_constraints
-            assert removed_constraints[0]
+            removed_placements = prune(satisfied_constraints,
+                                       constraint_to_placements)
+            assert removed_placements
+            assert removed_placements[0]
             solution = solve(constraint_to_placements, level = level + 1)
             if solution is not None:
                 return [next_placement] + solution
-            backtrack(satisfied_constraints, removed_constraints,
+            backtrack(satisfied_constraints, removed_placements,
                       constraint_to_placements)
         return None
     return solve(constraint_to_placements)
