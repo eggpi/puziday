@@ -26,7 +26,7 @@ PIECES = [
     Piece('Pento U', ('U', 'R', 'R', 'D'), '#177E89'),
     Piece('Pento Z', ('R', 'D', 'D', 'R'), '#412234'),
     Piece('Tetr I', ('R', 'R', 'R'), '#63A088'),
-    Piece('Tetr S', ('R', 'U', 'R'), '#052F5F'),
+    Piece('Tetr S', ('R', 'U', 'R'), '#252F5F'),
     Piece('Tetr L', ('L', 'U', 'U'), '#5C8001'),
 ]
 
