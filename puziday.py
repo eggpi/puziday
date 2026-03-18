@@ -156,6 +156,15 @@ class ExtraRow3PuzidayGrid(Grid):
             Cell(8, 6),
         ][day_of_week - 1]
 
+    def to_puziday_grid(self, placement):
+        cells = []
+        for cell in placement.cells:
+            row = cell.row
+            if row >= 3:
+                row -= 1
+            cells.append(Cell(row, cell.col))
+        return Placement(placement.piece, frozenset(cells))
+
 @dataclass(eq = True, frozen = True)
 class Piece:
     name: str
@@ -246,18 +255,19 @@ def compute_placement(cell, piece):
         cells.append(Cell(row, col))
     return Placement(piece, frozenset(cells))
 
-grid = ExtraRow3PuzidayGrid()
-placements = set()
-for row in range(grid.grid_rows()):
-    for col in range(grid.grid_cols()):
-        cell = Cell(row, col)
-        for piece_name, orientations in ORIENTATIONS.items():
-            for piece in orientations:
-                placement = compute_placement(cell, piece)
-                if grid.validate_placement(placement):
-                    placements.add(placement)
+def generate_valid_placements(grid):
+    placements = set()
+    for row in range(grid.grid_rows()):
+        for col in range(grid.grid_cols()):
+            cell = Cell(row, col)
+            for piece_name, orientations in ORIENTATIONS.items():
+                for piece in orientations:
+                    placement = compute_placement(cell, piece)
+                    if grid.validate_placement(placement):
+                        placements.add(placement)
+    return placements
 
-def solve_for_day(grid, month: int, day: int, day_of_week: int):
+def solve_for_day(grid: Grid, placements: List[Placement], month: int, day: int, day_of_week: int):
     month = grid.month_to_cell(month)
     day = grid.day_to_cell(day)
     day_of_week = grid.day_of_week_to_cell(day_of_week)
@@ -403,9 +413,27 @@ def render_to_ppm(grid, solution):
                 ppm.append(f'{" ".join(map(str, rgb))}\n' * CELL_SIZE_PX)
     return '\n'.join(ppm)
 
-today = datetime.datetime.today()
-solution = solve_for_day(month = today.month, day = today.day,
-                         day_of_week = 1 + ((today.weekday() + 1) % 7))
-output_file = os.path.join('solutions', today.strftime('%Y-%m-%d.ppm'))
-with open(output_file, 'wb') as output:
-    output.write(render_to_ppm(grid, solution).encode('utf-8'))
+def main(argv):
+    format = '%Y-%m-%d'
+    if len(argv) < 2:
+        day = datetime.datetime.today()
+    else:
+        day = datetime.date.strptime(argv[1], format)
+
+    for grid_class in [ExtraRow3PuzidayGrid, PuzidayGrid]:
+        grid = grid_class()
+        placements = generate_valid_placements(grid)
+        solution = solve_for_day(
+            grid, placements, month = day.month, day = day.day,
+            day_of_week = 1 + ((day.weekday() + 1) % 7))
+        if solution is not None:
+            break
+    if isinstance(grid, ExtraRow3PuzidayGrid):
+        solution = map(grid.to_puziday_grid, solution)
+        grid = PuzidayGrid()
+    output_file = os.path.join('solutions', day.strftime(format + '.ppm'))
+    with open(output_file, 'wb') as output:
+        output.write(render_to_ppm(grid, solution).encode('utf-8'))
+
+import sys
+main(sys.argv)
