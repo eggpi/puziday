@@ -1,15 +1,160 @@
 #!/usr/bin/env python3
 
+import abc
 import os
 import sys
 import datetime
 import pprint
 from dataclasses import dataclass
 
-GRID_ROWS = 8
-GRID_COLS = 7
-NUM_CELLS_TO_COVER = GRID_COLS * GRID_ROWS - 3 - 6
 CELL_SIZE_PX = 50
+
+class Grid(abc.ABC):
+    @abc.abstractmethod
+    def grid_rows(self):
+        pass
+
+    @abc.abstractmethod
+    def grid_cols(self):
+        pass
+
+    @abc.abstractmethod
+    def num_cells_to_cover(self):
+        pass
+
+    @abc.abstractmethod
+    def validate_placement(self, placement: Placement):
+        '''
+        Validate that a placement doesn't cover a forbidden cell.
+
+        Returns:
+            valid: bool, whether the placement is valid.
+        '''
+        pass
+
+    @abc.abstractmethod
+    def month_to_cell(self, month: int):
+        '''
+        Compute the cell for a given month (1 = January, 12 = December).
+
+        Returns:
+            cell: Cell, the cell corresponding to that month in this grid.
+        '''
+        pass
+
+    @abc.abstractmethod
+    def day_to_cell(self, day: int):
+        '''
+        Compute the cell for a given day of the month (1 to 31).
+
+        Returns:
+            cell: Cell, the cell corresponding to the day in this grid.
+        '''
+        pass
+
+    def day_of_week_to_cell(self, day_of_week: int):
+        '''
+        Compute the cell for a given day of the week (1 = Sunday, 7 = Saturday).
+
+        Returns:
+            cell: Cell, the cell corresponding to the day in this grid.
+        '''
+        pass
+
+class PuzidayGrid(Grid):
+    GRID_ROWS = 8
+    GRID_COLS = 7
+
+    def grid_rows(self):
+        return self.GRID_ROWS
+
+    def grid_cols(self):
+        return self.GRID_COLS
+
+    def num_cells_to_cover(self):
+        return self.GRID_COLS * self.GRID_ROWS - 3 - 6
+
+    def validate_placement(self, placement):
+        for cell in placement.cells:
+            row, col = cell.row, cell.col
+            if row < 0 or row >= self.GRID_ROWS:
+                return False
+            if col < 0 or col >= self.GRID_COLS:
+                return False
+            if row in (0, 1) and col == self.GRID_COLS - 1:
+                return False
+            if row == self.GRID_ROWS - 1 and col < 4:
+                return False
+        return True
+
+    # 1 = January, 12 = December
+    def month_to_cell(self, month: int):
+        return Cell((month - 1) // 6, (month - 1) % 6)
+
+    def day_to_cell(self, day: int):
+        return Cell(2 + (day - 1) // self.GRID_COLS, (day - 1) % self.GRID_COLS)
+
+    # 1 = Sunday, 7 = Saturday
+    def day_of_week_to_cell(self, day_of_week: int):
+        return [
+            Cell(6, 3),
+            Cell(6, 4),
+            Cell(6, 5),
+            Cell(6, 6),
+            Cell(7, 4),
+            Cell(7, 5),
+            Cell(7, 6),
+        ][day_of_week - 1]
+
+class ExtraRow3PuzidayGrid(Grid):
+    GRID_ROWS = 9
+    GRID_COLS = 7
+
+    def grid_rows(self):
+        return self.GRID_ROWS
+
+    def grid_cols(self):
+        return self.GRID_COLS
+
+    def num_cells_to_cover(self):
+        return self.GRID_COLS * (self.GRID_ROWS - 1) - 3 - 6
+
+    def validate_placement(self, placement):
+        for cell in placement.cells:
+            row, col = cell.row, cell.col
+            if row == 3:
+                return False
+            if row < 0 or row >= self.GRID_ROWS:
+                return False
+            if col < 0 or col >= self.GRID_COLS:
+                return False
+            if row in (0, 1) and col == self.GRID_COLS - 1:
+                return False
+            if row == self.GRID_ROWS - 1 and col < 4:
+                return False
+        return True
+
+    # 1 = January, 12 = December
+    def month_to_cell(self, month: int):
+        return Cell((month - 1) // 6, (month - 1) % 6)
+
+    def day_to_cell(self, day: int):
+        row = 2 + (day - 1) // self.GRID_COLS
+        if row >= 3:
+            row += 1
+        return Cell(row, (day - 1) % self.GRID_COLS)
+
+    # 1 = Sunday, 7 = Saturday
+    def day_of_week_to_cell(self, day_of_week: int):
+        return [
+            Cell(7, 3),
+            Cell(7, 4),
+            Cell(7, 5),
+            Cell(7, 6),
+            Cell(8, 4),
+            Cell(8, 5),
+            Cell(8, 6),
+        ][day_of_week - 1]
 
 @dataclass(eq = True, frozen = True)
 class Piece:
@@ -99,63 +244,33 @@ def compute_placement(cell, piece):
         elif edge.startswith('R'):
             col += len(edge)
         cells.append(Cell(row, col))
-
-    # Validate all cells
-    for cell in cells:
-        row, col = cell.row, cell.col
-        if row < 0 or row >= GRID_ROWS:
-            return None
-        if col < 0 or col >= GRID_COLS:
-            return None
-        if row in (0, 1) and col == GRID_COLS - 1:
-            return None
-        if row == GRID_ROWS - 1 and col < 4:
-            return None
     return Placement(piece, frozenset(cells))
 
-PLACEMENTS = set()
-for row in range(GRID_ROWS):
-    for col in range(GRID_COLS):
+grid = ExtraRow3PuzidayGrid()
+placements = set()
+for row in range(grid.grid_rows()):
+    for col in range(grid.grid_cols()):
         cell = Cell(row, col)
         for piece_name, orientations in ORIENTATIONS.items():
             for piece in orientations:
                 placement = compute_placement(cell, piece)
-                if placement is not None:
-                    PLACEMENTS.add(placement)
+                if grid.validate_placement(placement):
+                    placements.add(placement)
 
-# 1 = January, 12 = December
-def month_to_cell(month: int):
-    return Cell((month - 1) // 6, (month - 1) % 6)
-
-def day_to_cell(day: int):
-    return Cell(2 + (day - 1) // GRID_COLS, (day - 1) % GRID_COLS)
-
-# 1 = Sunday, 7 = Saturday
-def day_of_week_to_cell(day_of_week: int):
-    return [
-        Cell(6, 3),
-        Cell(6, 4),
-        Cell(6, 5),
-        Cell(6, 6),
-        Cell(7, 4),
-        Cell(7, 5),
-        Cell(7, 6),
-    ][day_of_week - 1]
-
-def solve_for_day(month: int, day: int, day_of_week: int):
-    month = month_to_cell(month)
-    day = day_to_cell(day)
-    day_of_week = day_of_week_to_cell(day_of_week)
+def solve_for_day(grid, month: int, day: int, day_of_week: int):
+    month = grid.month_to_cell(month)
+    day = grid.day_to_cell(day)
+    day_of_week = grid.day_of_week_to_cell(day_of_week)
 
     all_placements = set()
-    for placement in PLACEMENTS:
+    for placement in placements:
         if month not in placement.cells and \
                 day not in placement.cells and \
                 day_of_week not in placement.cells:
             all_placements.add(placement)
-    return solve_x(all_placements)
+    return solve_x(grid, all_placements)
 
-def solve_x(all_placements):
+def solve_x(grid, all_placements):
     # Build the adjacency matrix with one constraint (column) per cell and piece.
     # We represent it as a dict where keys are columns and rows are set values.
     constraint_to_placements = {}
@@ -165,7 +280,8 @@ def solve_x(all_placements):
     for placement in all_placements:
         for cell in placement.cells:
             constraint_to_placements.setdefault(cell, set()).add(placement)
-    assert(len(constraint_to_placements) == len(PIECES) + NUM_CELLS_TO_COVER)
+    assert(len(constraint_to_placements) == len(PIECES) +
+           grid.num_cells_to_cover())
 
     def prune(satisfied_constraints, constraint_to_placements):
         '''
@@ -228,7 +344,7 @@ def solve_x(all_placements):
         return None
     return solve(constraint_to_placements)
 
-def solve_naive(all_placements):
+def solve_naive(grid, all_placements):
     cell_to_placements = {}
     for placement in all_placements:
         for cell in placement.cells:
@@ -265,24 +381,24 @@ def solve_naive(all_placements):
                 return [next_placement] + solution
             available_placements.update(removed_placements)
         return None
-    return solve(NUM_CELLS_TO_COVER, all_placements)
+    return solve(grid.num_cells_to_cover(), all_placements)
 
 def hext_to_rgb_tuple(rgb_color_hex):
     rgb_color_hex = rgb_color_hex.lstrip('#')
     return tuple(int(hh, 16)
          for hh in (rgb_color_hex[:2], rgb_color_hex[2:4], rgb_color_hex[4:]))
 
-def render_to_ppm(solution):
+def render_to_ppm(grid, solution):
     cell_to_rgb_color = {}
     for placement in solution:
         for cell in placement.cells:
             cell_to_rgb_color[cell] = hext_to_rgb_tuple(placement.piece.rgb_color_hex)
 
     ppm = []
-    ppm.append(f'P3\n{GRID_COLS * CELL_SIZE_PX} {GRID_ROWS * CELL_SIZE_PX}\n255')
-    for row in range(GRID_ROWS):
+    ppm.append(f'P3\n{grid.grid_cols() * CELL_SIZE_PX} {grid.grid_rows() * CELL_SIZE_PX}\n255')
+    for row in range(grid.grid_rows()):
         for _ in range(CELL_SIZE_PX):
-            for col in range(GRID_COLS):
+            for col in range(grid.grid_cols()):
                 rgb = cell_to_rgb_color.get(Cell(row, col), (0, 0, 0))
                 ppm.append(f'{" ".join(map(str, rgb))}\n' * CELL_SIZE_PX)
     return '\n'.join(ppm)
@@ -292,4 +408,4 @@ solution = solve_for_day(month = today.month, day = today.day,
                          day_of_week = 1 + ((today.weekday() + 1) % 7))
 output_file = os.path.join('solutions', today.strftime('%Y-%m-%d.ppm'))
 with open(output_file, 'wb') as output:
-    output.write(render_to_ppm(solution).encode('utf-8'))
+    output.write(render_to_ppm(grid, solution).encode('utf-8'))
