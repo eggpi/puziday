@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
 import abc
+import json
 import os
 import sys
 import datetime
 import pprint
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 CELL_SIZE_PX = 50
 
@@ -16,10 +17,6 @@ class Grid(abc.ABC):
 
     @abc.abstractmethod
     def grid_cols(self):
-        pass
-
-    @abc.abstractmethod
-    def num_cells_to_cover(self):
         pass
 
     @abc.abstractmethod
@@ -71,9 +68,6 @@ class PuzidayGrid(Grid):
     def grid_cols(self):
         return self.GRID_COLS
 
-    def num_cells_to_cover(self):
-        return self.GRID_COLS * self.GRID_ROWS - 3 - 6
-
     def validate_placement(self, placement):
         for cell in placement.cells:
             row, col = cell.row, cell.col
@@ -116,9 +110,6 @@ class ExtraRow3PuzidayGrid(Grid):
     def grid_cols(self):
         return self.GRID_COLS
 
-    def num_cells_to_cover(self):
-        return self.GRID_COLS * (self.GRID_ROWS - 1) - 3 - 6
-
     def validate_placement(self, placement):
         for cell in placement.cells:
             row, col = cell.row, cell.col
@@ -156,20 +147,15 @@ class ExtraRow3PuzidayGrid(Grid):
             Cell(8, 6),
         ][day_of_week - 1]
 
-    def to_puziday_grid(self, placement):
-        cells = []
-        for cell in placement.cells:
-            row = cell.row
-            if row >= 3:
-                row -= 1
-            cells.append(Cell(row, cell.col))
-        return Placement(placement.piece, frozenset(cells))
-
 @dataclass(eq = True, frozen = True)
 class Piece:
     name: str
     edges: tuple[str]
     rgb_color_hex: str
+
+    @classmethod
+    def from_python_dict(self, dct):
+        self.__dict__.update(dct)
 
 PIECES = [
     Piece('Pento L', ('L', 'U', 'U', 'U'), '#FAFF81'),
@@ -255,43 +241,56 @@ def compute_placement(cell, piece):
         cells.append(Cell(row, col))
     return Placement(piece, frozenset(cells))
 
-def generate_valid_placements(grid):
-    placements = set()
+def generate_valid_placements(grid, start_placements, start_row):
+    placements = set(start_placements)
+    excluded_pieces = set(p.piece.name for p in start_placements)
     for row in range(grid.grid_rows()):
         for col in range(grid.grid_cols()):
             cell = Cell(row, col)
             for piece_name, orientations in ORIENTATIONS.items():
+                if piece_name in excluded_pieces:
+                    continue
                 for piece in orientations:
                     placement = compute_placement(cell, piece)
-                    if grid.validate_placement(placement):
-                        placements.add(placement)
+                    if not grid.validate_placement(placement):
+                        continue
+                    if any(cell.row < start_row for cell in placement.cells):
+                        continue
+                    placements.add(placement)
     return placements
 
-def solve_for_day(grid: Grid, placements: List[Placement], month: int, day: int, day_of_week: int):
-    month = grid.month_to_cell(month)
-    day = grid.day_to_cell(day)
-    day_of_week = grid.day_of_week_to_cell(day_of_week)
+def solve_for_day(grid: Grid, placements: List[Placement], date: datetime.datetime):
+    month = grid.month_to_cell(date.month)
+    day = grid.day_to_cell(date.day)
+    day_of_week = grid.day_of_week_to_cell(1 + (date.weekday() + 1) % 7)
 
-    all_placements = set()
+    valid_placements = set()
     for placement in placements:
         if month not in placement.cells and \
                 day not in placement.cells and \
                 day_of_week not in placement.cells:
-            all_placements.add(placement)
-    return solve_x(grid, all_placements)
+            valid_placements.add(placement)
 
-def solve_x(grid, all_placements):
+    solution_placements = solve_x(valid_placements)
+    if solution_placements is None:
+        return None
+    return Solution(date, 3 if isinstance(grid, ExtraRow3PuzidayGrid) else 0,
+                    solution_placements)
+
+def solve_x(placements):
     # Build the adjacency matrix with one constraint (column) per cell and piece.
     # We represent it as a dict where keys are columns and rows are set values.
     constraint_to_placements = {}
-    for piece in PIECES:
-        constraint_to_placements[piece.name] = {
-            p for p in all_placements if p.piece.name == piece.name}
-    for placement in all_placements:
+    for placement in placements:
+        constraint_to_placements.setdefault(
+            placement.piece.name, set()).add(placement)
         for cell in placement.cells:
             constraint_to_placements.setdefault(cell, set()).add(placement)
-    assert(len(constraint_to_placements) == len(PIECES) +
-           grid.num_cells_to_cover())
+
+    # Validate the matrix: do the placements cover every available piece?
+    for piece in PIECES:
+        if piece.name not in constraint_to_placements:
+            return None
 
     def prune(satisfied_constraints, constraint_to_placements):
         '''
@@ -354,45 +353,6 @@ def solve_x(grid, all_placements):
         return None
     return solve(constraint_to_placements)
 
-def solve_naive(grid, all_placements):
-    cell_to_placements = {}
-    for placement in all_placements:
-        for cell in placement.cells:
-            cell_to_placements.setdefault(cell, []).append(placement)
-
-    piece_name_to_placements = {}
-    for placement in all_placements:
-        piece_name_to_placements.setdefault(placement.piece.name, []).append(placement)
-
-    def solve(num_cells_to_cover, available_placements, level = 0):
-        assert num_cells_to_cover >= 0, num_cells_to_cover
-        if num_cells_to_cover == 0:
-            return []
-        if not available_placements:
-            return None
-
-        for next_placement in list(available_placements):
-            removed_placements = set()
-            # Remove all placements for next_placement's piece.
-            for p in piece_name_to_placements[next_placement.piece.name]:
-                if p in available_placements:
-                    available_placements.remove(p)
-                    removed_placements.add(p)
-            # Remove all other placements that overlap with its cells.
-            for c in next_placement.cells:
-                for p in cell_to_placements[c]:
-                    if p in available_placements:
-                        available_placements.remove(p)
-                        removed_placements.add(p)
-            # print(' ' * level * 2 + next_placement.piece.name + f' ({len(next_placement.cells)})')
-            solution = solve(num_cells_to_cover - len(next_placement.cells),
-                             available_placements, level + 1)
-            if solution is not None:
-                return [next_placement] + solution
-            available_placements.update(removed_placements)
-        return None
-    return solve(grid.num_cells_to_cover(), all_placements)
-
 def hext_to_rgb_tuple(rgb_color_hex):
     rgb_color_hex = rgb_color_hex.lstrip('#')
     return tuple(int(hh, 16)
@@ -400,7 +360,7 @@ def hext_to_rgb_tuple(rgb_color_hex):
 
 def render_to_ppm(grid, solution):
     cell_to_rgb_color = {}
-    for placement in solution:
+    for placement in solution.placements:
         for cell in placement.cells:
             cell_to_rgb_color[cell] = hext_to_rgb_tuple(placement.piece.rgb_color_hex)
 
@@ -413,27 +373,125 @@ def render_to_ppm(grid, solution):
                 ppm.append(f'{" ".join(map(str, rgb))}\n' * CELL_SIZE_PX)
     return '\n'.join(ppm)
 
-def main(argv):
-    format = '%Y-%m-%d'
-    if len(argv) < 2:
-        day = datetime.datetime.today()
-    else:
-        day = datetime.date.strptime(argv[1], format)
+@dataclass
+class Solution:
+    date: datetime.datetime
+    straight_line_row: int
+    placements: list[Placement]
 
-    for grid_class in [ExtraRow3PuzidayGrid, PuzidayGrid]:
+    DATE_FORMAT = '%Y-%m-%d'
+
+    def date_str(self):
+        return self.date.strftime(self.DATE_FORMAT)
+
+    def to_puziday_grid(self):
+        if not self.straight_line_row:
+            return self
+
+        placements = []
+        for placement in self.placements:
+            cells = []
+            for cell in placement.cells:
+                row = cell.row
+                if row >= 3:
+                    row -= 1
+                cells.append(Cell(row, cell.col))
+            placements.append(Placement(placement.piece, frozenset(cells)))
+        return Solution(self.date, self.straight_line_row, placements)
+
+    def serialize(self):
+        result = {
+            'date': self.date_str(),
+            'straight_line_row': self.straight_line_row,
+            'placements': []
+        }
+        for placement in self.placements:
+            dct = asdict(placement)
+            dct['cells'] = [asdict(cell) for cell in placement.cells]
+            result['placements'].append(dct)
+        return result
+
+    @classmethod
+    def deserialize(klass, solution):
+        placements = []
+        for dct in solution['placements']:
+            cells = frozenset(Cell(c['row'], c['col']) for c in dct['cells'])
+            piece = Piece(dct['piece']['name'],
+                          tuple(dct['piece']['edges']),
+                          dct['piece']['rgb_color_hex'])
+            placements.append(Placement(piece, cells))
+        date = datetime.date.strptime(solution['date'], Solution.DATE_FORMAT)
+        return Solution(date,
+                        solution['straight_line_row'],
+                        placements)
+
+def solution_json_path(date: datetime.datetime):
+    return os.path.join('solutions', date.strftime(Solution.DATE_FORMAT + '.json'))
+
+def solution_ppm_path(date: datetime.datetime):
+    return os.path.join('solutions', date.strftime(Solution.DATE_FORMAT + '.ppm'))
+
+def try_load_solution(solution_json_path: str):
+    try:
+        with open(solution_json_path) as input:
+            return Solution.deserialize(json.load(input))
+    except FileNotFoundError:
+        print(f"Could not load {solution_json_path}, starting over...",
+              file = sys.stderr)
+    return None
+
+def main(argv):
+    if len(argv) < 2:
+        date = datetime.datetime.today()
+    else:
+        date = datetime.date.strptime(argv[1], Solution.DATE_FORMAT)
+
+    yesterday = date - datetime.timedelta(days = 1)
+    yesterdays_solution = try_load_solution(solution_json_path(yesterday))
+    if yesterdays_solution and not yesterdays_solution.straight_line_row:
+        print("Loaded yesterday's solution, but can't reuse it!")
+        yesterdays_solution = None
+
+    start_placements = set()
+    if yesterdays_solution:
+        for placement in yesterdays_solution.placements:
+            for cell in placement.cells:
+                if cell.row < yesterdays_solution.straight_line_row:
+                    start_placements.add(placement)
+
+    attempts = [
+        ('Solving from scratch with a straight line row constraint...',
+         ExtraRow3PuzidayGrid, set(), 0),
+        ('Solving from scratch without constraints...',
+         PuzidayGrid, set(), 0),
+    ]
+    if start_placements:
+        attempts.insert(0,
+            ("Solving with yesterday's solution as starting point...",
+             ExtraRow3PuzidayGrid, start_placements,
+             yesterdays_solution.straight_line_row))
+
+    for (message, grid_class, start_placements, straight_line_row) in attempts:
+        print(message, flush = True, end = ' ')
         grid = grid_class()
-        placements = generate_valid_placements(grid)
-        solution = solve_for_day(
-            grid, placements, month = day.month, day = day.day,
-            day_of_week = 1 + ((day.weekday() + 1) % 7))
+        placements = generate_valid_placements(
+            grid, start_placements, straight_line_row)
+        solution = solve_for_day(grid, placements, date)
         if solution is not None:
+            print('OK!')
             break
-    if isinstance(grid, ExtraRow3PuzidayGrid):
-        solution = map(grid.to_puziday_grid, solution)
-        grid = PuzidayGrid()
-    output_file = os.path.join('solutions', day.strftime(format + '.ppm'))
-    with open(output_file, 'wb') as output:
+        print('No solution')
+
+    if solution is None:
+        sys.exit(1)
+
+    solution = solution.to_puziday_grid()
+    grid = PuzidayGrid()
+
+    with open(solution_json_path(date), 'w') as output:
+        json.dump(solution.serialize(), output)
+
+    with open(solution_ppm_path(date), 'wb') as output:
         output.write(render_to_ppm(grid, solution).encode('utf-8'))
 
-import sys
 main(sys.argv)
